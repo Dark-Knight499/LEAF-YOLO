@@ -592,7 +592,12 @@ if __name__ == '__main__':
 
     # DDP mode
     opt.total_batch_size = opt.batch_size
-    device = select_device(opt.device, batch_size=opt.batch_size)
+    # device = 'cpu' or '0' or '0,1,2,3'
+    device = opt.device
+    if device.lower() != 'cpu' and not torch.cuda.is_available():
+        print('CUDA not available, forcing device to CPU')
+        device = 'cpu'
+    device = select_device(device, batch_size=opt.batch_size)
     if opt.local_rank != -1:
         assert torch.cuda.device_count() > opt.local_rank
         torch.cuda.set_device(opt.local_rank)

@@ -48,7 +48,11 @@ def test(data,
 
     else:  # called directly
         set_logging()
-        device = select_device(opt.device, batch_size=batch_size)
+        device = opt.device
+        if device.lower() != 'cpu' and not torch.cuda.is_available():
+            print('CUDA not available, forcing device to CPU')
+            device = 'cpu'
+        device = select_device(device, batch_size=batch_size)
 
         # Directories
         save_dir = Path(increment_path(Path(opt.project) / opt.name, exist_ok=opt.exist_ok))  # increment run

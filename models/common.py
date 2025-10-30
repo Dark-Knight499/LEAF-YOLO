@@ -1,6 +1,9 @@
 import math
 from copy import copy
 from pathlib import Path
+import torch
+import torch.nn as nn
+from torchvision.ops import DeformConv2d
 
 import numpy as np
 import pandas as pd
@@ -2731,3 +2734,60 @@ class EffSPP(nn.Module):
     def forward(self, x):
         x = self.cv1(x)
         return self.cv2(torch.cat([x] + [m(x) for m in self.m], 1))
+
+
+
+import torch
+import torch.nn as nn
+from torchvision.ops import DeformConv2d
+
+class DeformConv(nn.Module):
+    def __init__(self, c1, c2, k=3, s=1, p=None, g=1, bias=False):
+        super().__init__()
+        p = k // 2 if p is None else p
+        self.offset_conv = nn.Conv2d(c1, 2 * k * k, kernel_size=k, stride=s, padding=p)
+        self.deform_conv = DeformConv2d(c1, c2, kernel_size=k, stride=s, padding=p, bias=bias)
+        self.bn = nn.BatchNorm2d(c2)
+        self.act = nn.SiLU(inplace=True)
+
+    def forward(self, x):
+        offset = self.offset_conv(x)
+        x = self.deform_conv(x, offset)
+        return self.act(self.bn(x))
+
+
+class CBAM(nn.Module):
+    def __init__(self, channels, reduction=16, kernel_size=7):
+        super().__init__()
+        self.channel_attention = nn.Sequential(
+            nn.AdaptiveAvgPool2d(1),
+            nn.Conv2d(channels, channels // reduction, 1, bias=False),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(channels // reduction, channels, 1, bias=False),
+            nn.Sigmoid()
+        )
+        self.spatial_attention = nn.Sequential(
+            nn.Conv2d(2, 1, kernel_size, padding=kernel_size // 2, bias=False),
+            nn.Sigmoid()
+        )
+
+    def forward(self, x):
+        ca = self.channel_attention(x)
+        x = x * ca
+        sa = self.spatial_attention(torch.cat([torch.mean(x, 1, keepdim=True),
+                                               torch.max(x, 1, keepdim=True)[0]], dim=1))
+        x = x * sa
+        return x
+
+class ECA(nn.Module):
+    def __init__(self, channels, k_size=3):
+        super().__init__()
+        self.avg_pool = nn.AdaptiveAvgPool2d(1)
+        self.conv = nn.Conv1d(1, 1, kernel_size=k_size, padding=(k_size - 1) // 2, bias=False)
+        self.sigmoid = nn.Sigmoid()
+
+    def forward(self, x):
+        y = self.avg_pool(x)
+        y = self.conv(y.squeeze(-1).transpose(-1, -2))
+        y = self.sigmoid(y.transpose(-1, -2).unsqueeze(-1))
+        return x * y.expand_as(x)
